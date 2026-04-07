@@ -1,4 +1,5 @@
 
+
 # RAG Embedder
 
 A swappable embedding layer for RAG pipelines.
@@ -48,5 +49,3 @@ Copy `.env.example` to `.env` and set one variable:
 | `gemini`      | Yes         | text-embedding-004     | 768  |
 
 ---
-
-
