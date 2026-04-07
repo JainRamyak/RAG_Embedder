@@ -6,8 +6,8 @@ Switch between local HuggingFace models and cloud APIs (OpenAI, Gemini) by chang
 ## Quick Start
 
 \`\`\`bash
-git clone <your-repo-url>
-cd rag-embedder
+git clone https://github.com/JainRamyak/RAG_Embedder.git
+cd RAG_Embedder
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python main.py
@@ -21,12 +21,14 @@ rag-embedder/
 │   ├── __init__.py        # Factory: get_embedder()
 │   ├── base.py            # Abstract base class
 │   ├── local_embedder.py  # HuggingFace (offline, free)
-│   └── api_embedder.py    # OpenAI / Gemini
+│   ├── api_embedder.py    # OpenAI / Gemini
+│   └── vector_store.py    # In-memory store: add, search, delete, save, load
 ├── tests/
 │   └── test_embedder.py   # 12 passing tests
 ├── notebooks/
 │   └── embedder_demo.ipynb
 ├── main.py
+├── store.json             # Auto-generated after first run
 ├── requirements.txt
 └── .env.example
 \`\`\`
