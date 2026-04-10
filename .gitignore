@@ -50,4 +50,5 @@ outputs/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.dbstore.json
+*.json
