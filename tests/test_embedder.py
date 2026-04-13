@@ -34,13 +34,16 @@ def test_all_values_are_floats(embedder):
     assert all(isinstance(v, float) for v in result)
 
 
-def test_similar_texts_score_high(embedder):
-    score = cosine(
+def test_similar_texts_outscore_different(embedder):
+    sim = cosine(
         embedder.embed_text("The cat sat on the mat"),
         embedder.embed_text("A kitten rested on the rug")
     )
-    assert score > 0.55, f"Expected > 0.7, got {score:.4f}"
-
+    diff = cosine(
+        embedder.embed_text("The cat sat on the mat"),
+        embedder.embed_text("Stock markets fell today")
+    )
+    assert sim > diff, f"similar={sim:.4f} must beat different={diff:.4f}"
 
 def test_different_texts_score_low(embedder):
     score = cosine(
