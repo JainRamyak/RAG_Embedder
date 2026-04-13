@@ -40,4 +40,7 @@ data/processed/
 .ipynb_checkpoints/
 
 # OS
-.DS_Store
+.DS_Storestore.json
+*.pkl
+*.faiss
+outputs/
