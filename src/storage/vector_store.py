@@ -1,79 +1,38 @@
-import json
-import os
+import logging, pickle
+from pathlib import Path
 import numpy as np
-from typing import List, Tuple, Optional
+import faiss
 
+logger = logging.getLogger(__name__)
 
-class SimpleVectorStore:
-    """
-    In-memory vector store with similarity search and disk persistence.
+class FAISSVectorStore:
+    def __init__(self, dimension: int):
+        self.dim = dimension
+        self.index = faiss.IndexFlatIP(dimension)
+        self.chunks: list[dict] = []
 
-    Usage:
-        store = SimpleVectorStore()
-        store.add("doc1", "The cat sat on the mat", embedder.embed_text("The cat sat on the mat"))
-        results = store.search(embedder.embed_text("kitten on rug"), top_k=3)
-    """
+    def add(self, chunks, vectors):
+        arr = np.array(vectors, dtype="float32")
+        faiss.normalize_L2(arr)
+        self.index.add(arr)
+        self.chunks.extend(chunks)
 
-    def __init__(self):
-        self.ids: List[str] = []
-        self.texts: List[str] = []
-        self.vectors: List[List[float]] = []
-
-    def add(self, doc_id: str, text: str, vector: List[float]):
-        if doc_id in self.ids:
-            raise ValueError(f"ID '{doc_id}' already exists. Use delete() first.")
-        self.ids.append(doc_id)
-        self.texts.append(text)
-        self.vectors.append(vector)
-
-    def delete(self, doc_id: str):
-        if doc_id not in self.ids:
-            raise KeyError(f"ID '{doc_id}' not found.")
-        idx = self.ids.index(doc_id)
-        self.ids.pop(idx)
-        self.texts.pop(idx)
-        self.vectors.pop(idx)
-
-    def search(self, query_vector: List[float], top_k: int = 3) -> List[Tuple[str, str, float]]:
-        if not self.vectors:
-            return []
-
-        query = np.array(query_vector)
-        scores = []
-
-        for doc_id, text, vec in zip(self.ids, self.texts, self.vectors):
-            vec = np.array(vec)
-            score = float(
-                np.dot(query, vec) /
-                (np.linalg.norm(query) * np.linalg.norm(vec))
-            )
-            scores.append((doc_id, text, score))
-
-        scores.sort(key=lambda x: x[2], reverse=True)
-        return scores[:top_k]
+    def search(self, query_vec, k=5):
+        arr = np.array([query_vec], dtype="float32")
+        faiss.normalize_L2(arr)
+        scores, idxs = self.index.search(arr, min(k, self.index.ntotal))
+        return [(self.chunks[i], float(s))
+                for s, i in zip(scores[0], idxs[0]) if i != -1]
 
     def save(self, path: str):
-        data = {
-            "ids": self.ids,
-            "texts": self.texts,
-            "vectors": self.vectors,
-        }
-        with open(path, "w") as f:
-            json.dump(data, f)
-        print(f"[VectorStore] Saved {len(self.ids)} documents → {path}")
+        p = Path(path); p.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(self.index, str(p/"index.faiss"))
+        with open(p/"chunks.pkl","wb") as f: pickle.dump(self.chunks, f)
 
     def load(self, path: str):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"No store found at '{path}'")
-        with open(path, "r") as f:
-            data = json.load(f)
-        self.ids = data["ids"]
-        self.texts = data["texts"]
-        self.vectors = data["vectors"]
-        print(f"[VectorStore] Loaded {len(self.ids)} documents ← {path}")
+        p = Path(path)
+        self.index = faiss.read_index(str(p/"index.faiss"))
+        with open(p/"chunks.pkl","rb") as f: self.chunks = pickle.load(f)
 
-    def __len__(self):
-        return len(self.ids)
-
-    def __repr__(self):
-        return f"SimpleVectorStore({len(self.ids)} documents)"
+    @property
+    def size(self): return self.index.ntotal
