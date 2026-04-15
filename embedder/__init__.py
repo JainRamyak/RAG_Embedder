@@ -2,7 +2,7 @@ import logging
 from .base import BaseEmbedder
 from .local_embedder import LocalEmbedder
 from .api_embedder import APIEmbedder
-from config import settings   # load_dotenv lives here now
+from config import settings   
 
 logger = logging.getLogger(__name__)
 

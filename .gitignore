@@ -44,3 +44,5 @@ data/processed/
 *.pkl
 *.faiss
 outputs/
+
+/src/generated/prisma
