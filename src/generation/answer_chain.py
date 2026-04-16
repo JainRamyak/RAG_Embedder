@@ -1,43 +1,31 @@
-import logging
-from openai import OpenAI
+import anthropic
 from config import settings
 
-logger = logging.getLogger(__name__)
+client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
-SYSTEM_PROMPT = """You are a precise document assistant.
-Rules you must follow without exception:
-1. Answer ONLY using the provided context chunks.
-2. Every factual claim must cite its source: (source: filename, page N)
-3. If the context does not contain enough information, respond:
-   "I cannot answer this from the provided documents."
-4. Never add information from your general knowledge.
-5. Be concise. Quote directly when helpful."""
+SYSTEM_PROMPT = """You are a precise assistant that answers questions strictly based on provided document chunks.
+Rules:
+- Only use information from the provided chunks
+- Cite sources by referencing [Source: filename] after each claim
+- If the answer is not in the chunks, say "I don't have enough information in the provided documents."
+- Be concise and factual"""
 
-def build_context(chunks: list[dict]) -> str:
-    parts = []
-    for i, c in enumerate(chunks):
-        parts.append(
-            f"[Chunk {i+1} | {c['source']} p.{c.get('page',1)}]\n{c['text']}"
-        )
-    return "\n\n---\n\n".join(parts)
-
-def answer(query: str, chunks: list[dict]) -> dict:
-    client = OpenAI(api_key=settings.openai_api_key)
-    context = build_context(chunks)
-    user_msg = f"Context:\n{context}\n\nQuestion: {query}"
-
-    response = client.chat.completions.create(
-        model=settings.llm_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_msg},
-        ],
-        temperature=0,
+def answer(question: str, chunks: list) -> dict:
+    context = "\n\n".join(
+        f"[Source: {c['source']}]\n{c['text']}" for c in chunks
     )
-    answer_text = response.choices[0].message.content
-    logger.info("Answer generated | chunks_used=%d", len(chunks))
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": f"Context:\n{context}\n\nQuestion: {question}"
+            }
+        ]
+    )
     return {
-        "answer": answer_text,
-        "sources": [{"source": c["source"], "page": c.get("page",1),
-                     "text": c["text"][:200]} for c in chunks],
+        "answer": message.content[0].text,
+        "sources": chunks
     }
