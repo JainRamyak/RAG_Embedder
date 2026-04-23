@@ -1,25 +1,60 @@
+"""
+config.py — single source of truth for all configuration.
+
+Usage anywhere in the project:
+    from config import settings
+    print(settings.embedder_type)
+    print(settings.anthropic_api_key)
+"""
 import os
 from dotenv import load_dotenv
-load_dotenv()
 
-def _opt(key, default=""):
+load_dotenv(override=True)  # override=True tells dotenv to always use the .env file values, even if the variable already exists in the shell environment. This is the correct setting for a development project.
+
+
+# --- helper functions (must be defined BEFORE _Settings class) ---
+
+def _optional(key: str, default: str = "") -> str:
+    """Read an env var, return default if missing or empty."""
     return os.getenv(key, default).strip()
 
+
+# --- settings class ---
+
 class _Settings:
-    embedder_type    = _opt("EMBEDDER_TYPE", "local").lower()
-    local_model_name = _opt("LOCAL_MODEL_NAME", "all-MiniLM-L6-v2")
-    openai_api_key   = _opt("OPENAI_API_KEY")
-    gemini_api_key   = _opt("GEMINI_API_KEY")
-    chunk_size       = int(_opt("CHUNK_SIZE", "512"))
-    chunk_overlap    = int(_opt("CHUNK_OVERLAP", "50"))
-    top_k            = int(_opt("TOP_K_RETRIEVAL", "5"))
-    log_level        = _opt("LOG_LEVEL", "INFO").upper()
-    llm_model        = _opt("LLM_MODEL", "gpt-4o-mini")
+    # Embedder selection
+    embedder_type: str      = _optional("EMBEDDER_TYPE", "local").lower()
+    local_model_name: str   = _optional("LOCAL_MODEL_NAME", "all-MiniLM-L6-v2")
 
-    def validate_provider(self, provider):
+    # Embedding API keys
+    openai_api_key: str     = _optional("OPENAI_API_KEY")
+    gemini_api_key: str     = _optional("GEMINI_API_KEY")
+
+    # LLM for answer generation
+    llm_provider: str       = _optional("LLM_PROVIDER", "anthropic")
+    anthropic_api_key: str  = _optional("ANTHROPIC_API_KEY")
+
+    # Chunking
+    chunk_size: int         = int(_optional("CHUNK_SIZE", "512"))
+    chunk_overlap: int      = int(_optional("CHUNK_OVERLAP", "50"))
+
+    # Retrieval
+    top_k: int              = int(_optional("TOP_K_RETRIEVAL", "5"))
+
+    # Logging
+    log_level: str          = _optional("LOG_LEVEL", "INFO").upper()
+
+    def validate_provider(self, provider: str) -> None:
+        """Call this before activating an embedding API provider."""
         if provider == "openai" and not self.openai_api_key:
-            raise EnvironmentError("OPENAI_API_KEY not set in .env")
+            raise EnvironmentError(
+                "EMBEDDER_TYPE=openai requires OPENAI_API_KEY in .env"
+            )
         if provider == "gemini" and not self.gemini_api_key:
-            raise EnvironmentError("GEMINI_API_KEY not set in .env")
+            raise EnvironmentError(
+                "EMBEDDER_TYPE=gemini requires GEMINI_API_KEY in .env"
+            )
 
+
+# Singleton — import this everywhere, never instantiate _Settings directly
 settings = _Settings()

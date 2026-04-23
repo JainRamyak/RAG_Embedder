@@ -1,31 +1,123 @@
-import anthropic
+"""
+src/generation/answer_chain.py
+
+Generates a cited answer from retrieved document chunks using an LLM.
+The LLM client is created lazily (inside the function, not at import time)
+so importing this module never crashes even if the API key isn't set yet.
+"""
+import logging
+from typing import List
 from config import settings
 
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a precise assistant that answers questions strictly based on provided document chunks.
-Rules:
-- Only use information from the provided chunks
-- Cite sources by referencing [Source: filename] after each claim
-- If the answer is not in the chunks, say "I don't have enough information in the provided documents."
-- Be concise and factual"""
 
-def answer(question: str, chunks: list) -> dict:
-    context = "\n\n".join(
-        f"[Source: {c['source']}]\n{c['text']}" for c in chunks
-    )
+SYSTEM_PROMPT = """You are a precise document assistant.
+Answer ONLY using the provided context.
+For every factual claim, cite the source number in brackets like [1] or [2].
+If the answer is not in the context, say exactly:
+'I could not find this in the provided documents.'
+Do not use any outside knowledge."""
+
+
+def _build_context(chunks: List[dict]) -> str:
+    """Format retrieved chunks into a numbered reference block."""
+    parts = []
+    for i, chunk in enumerate(chunks, 1):
+        source = chunk.get("source", "unknown")
+        text = chunk.get("text", "")
+        parts.append(f"[{i}] (source: {source})\n{text}")
+    return "\n\n".join(parts)
+
+
+def answer(question: str, chunks: List[dict]) -> dict:
+    """
+    Generate a cited answer from retrieved chunks.
+
+    Args:
+        question: The user's question string.
+        chunks:   List of dicts with keys 'text', 'source', 'score'.
+
+    Returns:
+        {"answer": str, "sources": list of {source, score}}
+    """
+    if not chunks:
+        return {"answer": "No relevant documents found.", "sources": []}
+
+    context = _build_context(chunks)
+    provider = settings.llm_provider.lower()
+
+    if provider == "anthropic":
+        return _answer_anthropic(question, context, chunks)
+    elif provider == "openai":
+        return _answer_openai(question, context, chunks)
+    else:
+        raise ValueError(
+            f"Unknown LLM_PROVIDER='{provider}' in .env. "
+            f"Valid options: anthropic, openai"
+        )
+
+
+def _answer_anthropic(question: str, context: str, chunks: List[dict]) -> dict:
+    """Call Claude via the Anthropic SDK."""
+    try:
+        import anthropic
+    except ImportError:
+        raise ImportError("Run: python3 -m pip install anthropic")
+
+    if not settings.anthropic_api_key:
+        raise EnvironmentError(
+            "ANTHROPIC_API_KEY is not set in .env. "
+            "Get a key at https://console.anthropic.com"
+        )
+
+    # Client created HERE, inside the function — not at import time
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-sonnet-4-20250514",
         max_tokens=1024,
         system=SYSTEM_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {question}"
+        }]
+    )
+
+    answer_text = message.content[0].text
+    logger.info("Answer generated | provider=anthropic | chars=%d", len(answer_text))
+
+    return {
+        "answer": answer_text,
+        "sources": [
+            {"source": c.get("source"), "score": c.get("score", 0)}
+            for c in chunks
+        ]
+    }
+
+
+def _answer_openai(question: str, context: str, chunks: List[dict]) -> dict:
+    """Call GPT via the OpenAI SDK."""
+    from openai import OpenAI
+
+    if not settings.openai_api_key:
+        raise EnvironmentError("OPENAI_API_KEY is not set in .env")
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
         messages=[
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {question}"
-            }
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
         ]
     )
+    answer_text = resp.choices[0].message.content
+    logger.info("Answer generated | provider=openai | chars=%d", len(answer_text))
+
     return {
-        "answer": message.content[0].text,
-        "sources": chunks
+        "answer": answer_text,
+        "sources": [
+            {"source": c.get("source"), "score": c.get("score", 0)}
+            for c in chunks
+        ]
     }
