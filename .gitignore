@@ -46,3 +46,7 @@ data/processed/
 outputs/
 
 /src/generated/prisma
+node_modules/
+package.json
+package-lock.json
+prisma/
