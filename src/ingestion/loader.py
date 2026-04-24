@@ -1,24 +1,66 @@
+"""
+src/ingestion/loader.py
+
+Loads documents from a directory.
+Supported formats: .txt, .md, .pdf
+"""
 import logging
 from pathlib import Path
-import pymupdf  # pip install pymupdf
+from typing import List
 
 logger = logging.getLogger(__name__)
 
-def load_file(path: str) -> list[dict]:
-    p = Path(path)
-    if p.suffix == ".pdf":
-        doc = pymupdf.open(str(p))
-        return [{"text": page.get_text(), "source": p.name, "page": i+1}
-                for i, page in enumerate(doc) if page.get_text().strip()]
-    else:
-        text = p.read_text(encoding="utf-8")
-        return [{"text": text, "source": p.name, "page": 1}]
 
-def load_directory(dir_path: str, exts=None) -> list[dict]:
-    exts = exts or [".txt", ".md", ".pdf"]
+def load_documents(directory: str) -> List[dict]:
+    """
+    Load all supported files from a directory.
+    Returns list of {"text": str, "source": str}
+    """
     docs = []
-    for path in Path(dir_path).rglob("*"):
-        if path.suffix.lower() in exts:
-            docs.extend(load_file(str(path)))
-    logger.info("Loaded %d pages from %s", len(docs), dir_path)
+    path = Path(directory)
+
+    for filepath in sorted(path.rglob("*")):
+        if filepath.suffix == ".pdf":
+            docs.extend(_load_pdf(filepath))
+        elif filepath.suffix in (".txt", ".md"):
+            docs.extend(_load_text(filepath))
+
+    logger.info("Loaded %d pages from %s", len(docs), directory)
+    return docs
+
+
+def _load_text(filepath: Path) -> List[dict]:
+    """Load a plain text or markdown file."""
+    try:
+        text = filepath.read_text(encoding="utf-8").strip()
+        if not text:
+            return []
+        return [{"text": text, "source": filepath.name}]
+    except Exception as e:
+        logger.warning("Failed to load %s: %s", filepath, e)
+        return []
+
+
+def _load_pdf(filepath: Path) -> List[dict]:
+    """Load a PDF file, one dict per page."""
+    try:
+        import pymupdf  # PyMuPDF
+    except ImportError:
+        raise ImportError("Run: pip install pymupdf")
+
+    docs = []
+    try:
+        pdf = pymupdf.open(str(filepath))
+        for page_num, page in enumerate(pdf, 1):
+            text = page.get_text().strip()
+            if text:
+                docs.append({
+                    "text": text,
+                    "source": f"{filepath.name}#page{page_num}"
+                })
+        pdf.close()
+        logger.info("PDF loaded: %s | %d pages", filepath.name, len(docs))
+    except Exception as e:
+        logger.warning("Failed to load PDF %s: %s", filepath, e)
+
     return docs
