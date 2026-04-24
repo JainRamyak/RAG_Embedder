@@ -45,8 +45,5 @@ data/processed/
 *.faiss
 outputs/
 
-#Keys
-
-
-Key.txt
-*.txt # optional but safe
+#Handoff Doc
+Handoff Document.txt

@@ -29,8 +29,9 @@ class AskMyDocsPipeline:
         logger.info("Ingested %d chunks from %s", len(chunks), directory)
         return len(chunks)
 
-
     def ask(self, question: str) -> dict:
+        if not question or not question.strip():
+            return {"answer": "No relevant documents found.", "sources": []}
         q_vec      = self.embedder.embed_text(question)
         candidates = hybrid_search(question, q_vec,
                                    self.vec_store, self.bm25_store,

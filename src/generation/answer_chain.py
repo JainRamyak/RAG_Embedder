@@ -4,6 +4,12 @@ src/generation/answer_chain.py
 Generates a cited answer from retrieved document chunks using an LLM.
 The LLM client is created lazily (inside the function, not at import time)
 so importing this module never crashes even if the API key isn't set yet.
+
+Supported providers (set LLM_PROVIDER in .env):
+    gemini    — Google Gemini 2.5 Flash (FREE, no credit card needed)
+    anthropic — Anthropic Claude (requires paid credits)
+    openai    — OpenAI GPT-4o-mini (requires paid credits)
+    mistralai — MIstralAI 
 """
 import logging
 from typing import List
@@ -47,19 +53,60 @@ def answer(question: str, chunks: List[dict]) -> dict:
     context = _build_context(chunks)
     provider = settings.llm_provider.lower()
 
-    if provider == "anthropic":
+    if provider == "gemini":
+        return _answer_gemini(question, context, chunks)
+    elif provider == "anthropic":
         return _answer_anthropic(question, context, chunks)
     elif provider == "openai":
+        return _answer_openai(question, context, chunks)
+    elif provider == "mistralai":
         return _answer_openai(question, context, chunks)
     else:
         raise ValueError(
             f"Unknown LLM_PROVIDER='{provider}' in .env. "
-            f"Valid options: anthropic, openai"
+            f"Valid options: gemini, anthropic, openai, mistralai"
         )
 
 
+def _answer_gemini(question: str, context: str, chunks: List[dict]) -> dict:
+    """Call Gemini 2.5 Flash via new google-genai SDK (Python 3.14 compatible)."""
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        raise ImportError("Run: python3 -m pip install google-genai")
+
+    if not settings.gemini_api_key:
+        raise EnvironmentError(
+            "GEMINI_API_KEY is not set in .env. "
+            "Get a free key at https://aistudio.google.com"
+        )
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=f"Context:\n{context}\n\nQuestion: {question}",
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=1024,
+        )
+    )
+
+    answer_text = response.text
+    logger.info("Answer generated | provider=gemini | chars=%d", len(answer_text))
+
+    return {
+        "answer": answer_text,
+        "sources": [
+            {"source": c.get("source"), "score": c.get("score", 0)}
+            for c in chunks
+        ]
+    }
+
+
 def _answer_anthropic(question: str, context: str, chunks: List[dict]) -> dict:
-    """Call Claude via the Anthropic SDK."""
+    """Call Claude via the Anthropic SDK (requires paid credits)."""
     try:
         import anthropic
     except ImportError:
@@ -71,7 +118,6 @@ def _answer_anthropic(question: str, context: str, chunks: List[dict]) -> dict:
             "Get a key at https://console.anthropic.com"
         )
 
-    # Client created HERE, inside the function — not at import time
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     message = client.messages.create(
@@ -97,8 +143,11 @@ def _answer_anthropic(question: str, context: str, chunks: List[dict]) -> dict:
 
 
 def _answer_openai(question: str, context: str, chunks: List[dict]) -> dict:
-    """Call GPT via the OpenAI SDK."""
-    from openai import OpenAI
+    """Call GPT via the OpenAI SDK (requires paid credits)."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise ImportError("Run: python3 -m pip install openai")
 
     if not settings.openai_api_key:
         raise EnvironmentError("OPENAI_API_KEY is not set in .env")
@@ -113,6 +162,42 @@ def _answer_openai(question: str, context: str, chunks: List[dict]) -> dict:
     )
     answer_text = resp.choices[0].message.content
     logger.info("Answer generated | provider=openai | chars=%d", len(answer_text))
+
+    return {
+        "answer": answer_text,
+        "sources": [
+            {"source": c.get("source"), "score": c.get("score", 0)}
+            for c in chunks
+        ]
+    }
+
+
+def _answer_mistralai(question: str, context: str, chunks: List[dict]) -> dict:
+    """Call Mistral via the Mistral AI API."""
+    try:
+        from mistralai.client import MistralClient
+        from mistralai.models.chat_completion import ChatMessage
+    except ImportError:
+        raise ImportError("Run: python3 -m pip install mistralai")
+
+    if not settings.mistral_api_key:
+        raise EnvironmentError("MISTRAL_API_KEY is not set in .env")
+
+    client = MistralClient(api_key=settings.mistral_api_key)
+
+    resp = client.chat(
+        model="mistral-small",
+        messages=[
+            ChatMessage(role="system", content=SYSTEM_PROMPT),
+            ChatMessage(
+                role="user",
+                content=f"Context:\n{context}\n\nQuestion: {question}"
+            )
+        ]
+    )
+
+    answer_text = resp.choices[0].message.content
+    logger.info("Answer generated | provider=mistral | chars=%d", len(answer_text))
 
     return {
         "answer": answer_text,

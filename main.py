@@ -1,5 +1,5 @@
 from logger import setup_logging
-setup_logging()  # Must be first
+setup_logging()  
 
 import logging
 from embedder import get_embedder
