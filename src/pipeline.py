@@ -1,6 +1,6 @@
 import logging
 from embedder import get_embedder
-from src.ingestion.loader import load_directory
+from src.ingestion.loader import load_documents
 from src.ingestion.chunker import chunk_documents
 from src.storage.vector_store import FAISSVectorStore
 from src.storage.bm25_store import BM25Store
@@ -19,7 +19,7 @@ class AskMyDocsPipeline:
         self.reranker   = Reranker()
 
     def ingest(self, directory: str, save_path="outputs/store") -> int:
-        docs   = load_directory(directory)
+        docs   = load_documents(directory)
         chunks = chunk_documents(docs)
         vecs   = self.embedder.embed_batch([c["text"] for c in chunks])
         self.vec_store.add(chunks, vecs)
@@ -28,6 +28,7 @@ class AskMyDocsPipeline:
         self.bm25_store.save(save_path)
         logger.info("Ingested %d chunks from %s", len(chunks), directory)
         return len(chunks)
+
 
     def ask(self, question: str) -> dict:
         q_vec      = self.embedder.embed_text(question)
