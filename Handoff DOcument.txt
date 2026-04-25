@@ -18,7 +18,48 @@ Ingest any folder of documents (txt, md, PDF) and ask questions
 in plain English. Returns cited answers like:
   "Python was created by Guido van Rossum [1]."
 Answers ONLY from your documents. Exposed as a REST API.
-Supports 3 LLM backends: Gemini (free), OpenAI, Anthropic.
+Supports 4 LLM backends switchable via one .env line.
+
+================================================================
+LLM PROVIDER SWITCHING
+================================================================
+Change ONE line in .env to switch providers instantly:
+
+  LLM_PROVIDER=gemini      ← FREE, recommended default
+  LLM_PROVIDER=mistral     ← FREE tier available
+  LLM_PROVIDER=openai      ← requires paid credits
+  LLM_PROVIDER=anthropic   ← requires paid credits
+
+Provider details:
+  gemini:
+    Model:   gemini-2.5-flash
+    SDK:     google-genai==1.73.1
+    Cost:    Free (no credit card)
+    Key:     GEMINI_API_KEY
+    Get at:  aistudio.google.com
+
+  mistral:
+    Model:   mistral-small-latest
+    SDK:     mistralai==2.4.2
+    Cost:    Free tier (no credit card)
+    Key:     MISTRAL_API_KEY
+    Get at:  console.mistral.ai
+    Note:    Use Mistral(api_key=...) and client.chat.complete()
+             NOT MistralClient (old v1 SDK, incompatible)
+
+  openai:
+    Model:   gpt-4o-mini
+    SDK:     openai==2.32.0
+    Cost:    Paid (~$0.15/1M tokens)
+    Key:     OPENAI_API_KEY
+    Get at:  platform.openai.com
+
+  anthropic:
+    Model:   claude-sonnet-4-20250514
+    SDK:     anthropic==0.94.1
+    Cost:    Paid (~$3/1M tokens)
+    Key:     ANTHROPIC_API_KEY
+    Get at:  console.anthropic.com
 
 ================================================================
 ARCHITECTURE
@@ -38,14 +79,14 @@ HTTP Request
     ├── INGEST:
     │     loader.py      → .txt / .md / .pdf
     │     chunker.py     → 512-char overlapping chunks
-    │     embedder/      → 384-dim vectors
+    │     embedder/      → 384-dim vectors (all-MiniLM-L6-v2)
     │     vec_store      → FAISS (semantic search)
     │     bm25_store     → BM25 (keyword search)
     │
     └── ASK:
-          hybrid_retriever.py  → FAISS + BM25 via RRF
+          hybrid_retriever.py  → FAISS + BM25 fused via RRF
           reranker.py          → cross-encoder reranking
-          answer_chain.py      → LLM with citation prompt
+          answer_chain.py      → gemini/mistral/openai/anthropic
           → {"answer": "...[1]...", "sources": [...]}
 
 ================================================================
@@ -57,7 +98,7 @@ RAG_Embedder/
 ├── .gitignore
 ├── README.md                   ← Step 8 (next)
 ├── requirements.txt
-├── config.py                   ← settings singleton
+├── config.py                   ← settings singleton (all 4 keys)
 ├── logger.py
 ├── main.py
 │
@@ -79,7 +120,7 @@ RAG_Embedder/
 │   │   ├── hybrid_retriever.py ← RRF fusion
 │   │   └── reranker.py         ← cross-encoder
 │   ├── generation/
-│   │   └── answer_chain.py     ← gemini / openai / anthropic
+│   │   └── answer_chain.py     ← all 4 providers ✅
 │   └── evaluation/             ← planned Step 9
 │
 ├── api/
@@ -98,54 +139,23 @@ RAG_Embedder/
 └── outputs/                    ← gitignored
 
 ================================================================
-LLM PROVIDER SWITCHING
-================================================================
-Change ONE line in .env to switch providers:
-
-  LLM_PROVIDER=gemini       ← FREE, recommended, no credit card
-  LLM_PROVIDER=openai       ← needs credits at platform.openai.com
-  LLM_PROVIDER=anthropic    ← needs credits at console.anthropic.com
-
-Provider details:
-  gemini:
-    Model:   gemini-2.5-flash
-    SDK:     google-genai==1.73.1
-    Cost:    Free (1000 req/day on free tier)
-    Key:     GEMINI_API_KEY (get at aistudio.google.com)
-
-  openai:
-    Model:   gpt-4o-mini
-    SDK:     openai==2.32.0
-    Cost:    ~$0.15 per 1M input tokens (paid)
-    Key:     OPENAI_API_KEY (get at platform.openai.com)
-    Minimum: $5 credit deposit required
-
-  anthropic:
-    Model:   claude-sonnet-4-20250514
-    SDK:     anthropic==0.94.1
-    Cost:    ~$3 per 1M input tokens (paid)
-    Key:     ANTHROPIC_API_KEY (get at console.anthropic.com)
-    Minimum: $5 credit deposit required
-
-Verify after switching:
-  python3 -c "from config import settings; \
-  print(settings.llm_provider, bool(settings.gemini_api_key))"
-
-================================================================
-.env FORMAT (complete)
+COMPLETE .env FORMAT
 ================================================================
 # Embedder
 EMBEDDER_TYPE=local
 LOCAL_MODEL_NAME=all-MiniLM-L6-v2
 
-# API keys for embedding (only if EMBEDDER_TYPE != local)
+# Embedding API keys (only if EMBEDDER_TYPE != local)
 OPENAI_API_KEY=sk-your-openai-key
 GEMINI_API_KEY=your-gemini-key
 
 # LLM for answer generation
-# Options: gemini | openai | anthropic
+# Options: gemini | mistral | openai | anthropic
 LLM_PROVIDER=gemini
+
+# LLM API keys
 ANTHROPIC_API_KEY=sk-ant-your-key
+MISTRAL_API_KEY=your-mistral-key
 
 # Chunking
 CHUNK_SIZE=512
@@ -160,56 +170,38 @@ LOG_LEVEL=INFO
 ================================================================
 KEY DECISIONS
 ================================================================
-- Default LLM: gemini-2.5-flash (free, no credit card needed)
-- google-generativeai REMOVED (incompatible with Python 3.14)
-- google-genai==1.73.1 used instead (pure Python, works on 3.14)
-- gemini-2.0-flash has limit=0 on free tier — use gemini-2.5-flash
-- p.vec_store NOT p.vector_store (pipeline attribute name)
-- loader function: load_documents() NOT load_directory()
-- api/__init__.py must be EMPTY (not contain any code)
+- Default LLM: gemini-2.5-flash (free, no credit card)
+- Mistral SDK: mistralai==2.4.2 uses Mistral() not MistralClient()
+  and client.chat.complete() not client.chat()
+  (old v1 imports will crash — always use v2 API)
+- google-generativeai REMOVED (Python 3.14 incompatible)
+- google-genai==1.73.1 used instead (pure Python)
+- gemini-2.0-flash has limit=0 — use gemini-2.5-flash
+- p.vec_store NOT p.vector_store
+- load_documents() NOT load_directory()
+- api/__init__.py must be EMPTY
 - load_dotenv(override=True) in config.py
-- LLM client created INSIDE functions (lazy init, not at import)
-- _optional() must be defined BEFORE _Settings class in config.py
-- Never commit .env, Key.txt, or tokens of any kind
-- GitHub push needs Personal Access Token (not password):
+- LLM client created INSIDE functions (lazy init)
+- _optional() must be BEFORE _Settings class in config.py
+- config.py default LLM_PROVIDER changed from anthropic → gemini
+- Never commit .env, Key.txt, or tokens
+- GitHub push: use Personal Access Token
   git push https://JainRamyak:TOKEN@github.com/JainRamyak/RAG_Embedder.git main
-- 503 from Gemini = temporary server overload, just re-run
-
-================================================================
-HOW TO RUN
-================================================================
-# Terminal 1 — start API server
-source /home/jain_ramyak/Personal/Projects/RAG_Embedder/venv/bin/activate
-uvicorn api.main:app --reload
-
-# Terminal 2 — test endpoints
-source /home/jain_ramyak/Personal/Projects/RAG_Embedder/venv/bin/activate
-
-curl http://localhost:8000/health
-# → {"status":"ok"}
-
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"directory": "docs/"}'
-# → {"message":"...","chunks_ingested":23}
-
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Who created Python?"}'
-# → {"answer":"Guido van Rossum [1].","sources":[...]}
-
-# Browser — interactive UI
-http://localhost:8000/docs
+- 503 from Gemini = temporary overload, re-run
+- 429 from OpenAI = no credits, switch to gemini or mistral
 
 ================================================================
 VERIFICATION CHECKLIST
 ================================================================
-# 1. Config and key loads
-python3 -c "from config import settings; \
-print(settings.llm_provider, bool(settings.gemini_api_key))"
-# Expected: gemini True
+# 1. Config loads all keys
+python3 -c "
+from config import settings
+print('provider:', settings.llm_provider)
+print('gemini:', bool(settings.gemini_api_key))
+print('mistral:', bool(settings.mistral_api_key))
+"
 
-# 2. Full end-to-end pipeline
+# 2. Full pipeline test
 python3 -c "
 import logging; logging.basicConfig(level=logging.INFO)
 from src.pipeline import AskMyDocsPipeline
@@ -221,12 +213,14 @@ print('Sources:', [s['source'] for s in result['sources']])
 "
 # Expected: Guido van Rossum [1].
 
-# 3. All tests pass
+# 3. All tests
 pytest tests/ -v
 # Expected: 23 passed, 0 failed
+# NOTE: Tests call the LLM. If Gemini 503 → re-run.
+#       If wrong provider set → fix LLM_PROVIDER in .env
 
-# 4. API all endpoints working
-uvicorn api.main:app --reload   # Terminal 1
+# 4. API server
+uvicorn api.main:app --reload
 curl http://localhost:8000/health
 curl -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
@@ -238,34 +232,36 @@ curl -X POST http://localhost:8000/query \
 ================================================================
 STEP STATUS
 ================================================================
-Step 1  Embedder package                    ✅ DONE
+Step 1  Embedder package                   ✅ DONE
 Step 2  Config + logging                   ✅ DONE
 Step 3  Ingestion (loader + chunker)       ✅ DONE
 Step 4  Storage + Retrieval + Generation   ✅ DONE
 Step 5  PDF support in loader.py           ✅ DONE
 Step 6  FastAPI REST layer                 ✅ DONE
 Step 7  Pipeline tests (11 tests)          ✅ DONE
-Step 8  README update                      ❌ NEXT
+Step 7b Mistral AI + 4-provider support    ✅ DONE
+Step 8  README update                      ✅ DONE
 Step 9  RAGAS evaluation                   ❌ NOT STARTED
 
 ================================================================
-STEP 8 — README (what to write)
+HOW TO RUN
 ================================================================
-Sections to include:
-  1. Project title + one-line description
-  2. Architecture diagram (text-based is fine)
-  3. Quickstart:
-       git clone ...
-       cd RAG_Embedder
-       python3 -m venv venv
-       source venv/bin/activate
-       pip install -r requirements.txt
-       cp .env.example .env   # fill in GEMINI_API_KEY
-       uvicorn api.main:app --reload
-  4. Example output showing cited answer
-  5. Environment variables table
-  6. Supported LLM providers table
-  7. Running tests: pytest tests/ -v
+# Terminal 1 — API server
+source /home/jain_ramyak/Personal/Projects/RAG_Embedder/venv/bin/activate
+uvicorn api.main:app --reload
+
+# Terminal 2
+source /home/jain_ramyak/Personal/Projects/RAG_Embedder/venv/bin/activate
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"directory": "docs/"}'
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Who created Python?"}'
+
+# Browser
+http://localhost:8000/docs
 
 ================================================================
 RESUME PROMPT FOR NEW CHAT
@@ -275,27 +271,38 @@ Repo: https://github.com/JainRamyak/RAG_Embedder
 Stack: Python 3.14, zsh, EndeavourOS
 Venv: source /home/jain_ramyak/Personal/Projects/RAG_Embedder/venv/bin/activate
 
-COMPLETED (Steps 1-7):
+COMPLETED (Steps 1-7 + Mistral):
   ✅ Full pipeline: "Who created Python?" → "Guido van Rossum [1]."
   ✅ PDF ingestion via PyMuPDF
   ✅ FastAPI: /health /ingest /query all working
   ✅ Swagger UI: http://localhost:8000/docs
   ✅ 23 tests (12 embedder + 11 pipeline), all passing
-  ✅ 3 LLM backends: gemini (free) / openai / anthropic
-  Current LLM: gemini-2.5-flash (google-genai==1.73.1, free)
+  ✅ 4 LLM backends: gemini/mistral (free) + openai/anthropic (paid)
+
+SDK VERSIONS (critical):
+  google-genai==1.73.1      (NOT google-generativeai)
+  mistralai==2.4.2          (use Mistral() not MistralClient())
+  openai==2.32.0
+  anthropic==0.94.1
 
 CRITICAL NOTES:
-  - google-genai NOT google-generativeai (Python 3.14 incompatible)
-  - Model: gemini-2.5-flash (gemini-2.0-flash has limit=0)
+  - Default LLM_PROVIDER=gemini in config.py
+  - gemini-2.5-flash (not 2.0-flash, limit=0)
   - p.vec_store not p.vector_store
   - load_documents() not load_directory()
   - api/__init__.py must be empty
   - load_dotenv(override=True) in config.py
-  - 503 from Gemini = temporary overload, just re-run
-  - GitHub push needs Personal Access Token not password
+  - mistral dispatcher key is "mistral" not "mistralai"
+  - 503 Gemini = overload, re-run
+  - 429 OpenAI = no credits, switch provider
 
 CURRENT TASK: Step 8 — update README.md
-  Sections: description, quickstart, architecture,
-  env vars table, provider comparison, test command,
-  example output with cited answer
+  Sections needed:
+    1. Title + one-line description
+    2. Architecture diagram (text)
+    3. Quickstart (clone → venv → pip → .env → uvicorn)
+    4. All 4 LLM providers table with free/paid status
+    5. Environment variables table
+    6. Example cited answer output
+    7. Running tests command
 ================================================================
