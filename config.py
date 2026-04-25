@@ -4,12 +4,13 @@ config.py — single source of truth for all configuration.
 Usage anywhere in the project:
     from config import settings
     print(settings.embedder_type)
-    print(settings.anthropic_api_key)
+    print(settings.llm_provider)
+    print(settings.gemini_api_key)
 """
 import os
 from dotenv import load_dotenv
 
-load_dotenv(override=True)  # override=True tells dotenv to always use the .env file values, even if the variable already exists in the shell environment. This is the correct setting for a development project.
+load_dotenv(override=True)
 
 
 # --- helper functions (must be defined BEFORE _Settings class) ---
@@ -31,8 +32,10 @@ class _Settings:
     gemini_api_key: str     = _optional("GEMINI_API_KEY")
 
     # LLM for answer generation
-    llm_provider: str       = _optional("LLM_PROVIDER", "anthropic")
+    # Options: gemini | mistral | openai | anthropic
+    llm_provider: str       = _optional("LLM_PROVIDER", "gemini")
     anthropic_api_key: str  = _optional("ANTHROPIC_API_KEY")
+    mistral_api_key: str    = _optional("MISTRAL_API_KEY")
 
     # Chunking
     chunk_size: int         = int(_optional("CHUNK_SIZE", "512"))

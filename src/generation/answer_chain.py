@@ -6,10 +6,10 @@ The LLM client is created lazily (inside the function, not at import time)
 so importing this module never crashes even if the API key isn't set yet.
 
 Supported providers (set LLM_PROVIDER in .env):
-    gemini    — Google Gemini 2.5 Flash (FREE, no credit card needed)
-    anthropic — Anthropic Claude (requires paid credits)
-    openai    — OpenAI GPT-4o-mini (requires paid credits)
-    mistralai — MIstralAI 
+    gemini    — Google Gemini 2.5 Flash   (FREE, no credit card needed)
+    mistral   — Mistral Small Latest      (FREE tier available)
+    openai    — OpenAI GPT-4o-mini        (requires paid credits)
+    anthropic — Anthropic Claude Sonnet   (requires paid credits)
 """
 import logging
 from typing import List
@@ -55,26 +55,26 @@ def answer(question: str, chunks: List[dict]) -> dict:
 
     if provider == "gemini":
         return _answer_gemini(question, context, chunks)
-    elif provider == "anthropic":
-        return _answer_anthropic(question, context, chunks)
+    elif provider == "mistral":
+        return _answer_mistral(question, context, chunks)
     elif provider == "openai":
         return _answer_openai(question, context, chunks)
-    elif provider == "mistralai":
-        return _answer_openai(question, context, chunks)
+    elif provider == "anthropic":
+        return _answer_anthropic(question, context, chunks)
     else:
         raise ValueError(
             f"Unknown LLM_PROVIDER='{provider}' in .env. "
-            f"Valid options: gemini, anthropic, openai, mistralai"
+            f"Valid options: gemini, mistral, openai, anthropic"
         )
 
 
 def _answer_gemini(question: str, context: str, chunks: List[dict]) -> dict:
-    """Call Gemini 2.5 Flash via new google-genai SDK (Python 3.14 compatible)."""
+    """Call Gemini 2.5 Flash via google-genai SDK (Python 3.14 compatible, FREE)."""
     try:
         from google import genai
         from google.genai import types
     except ImportError:
-        raise ImportError("Run: python3 -m pip install google-genai")
+        raise ImportError("Run: pip install google-genai")
 
     if not settings.gemini_api_key:
         raise EnvironmentError(
@@ -105,12 +105,79 @@ def _answer_gemini(question: str, context: str, chunks: List[dict]) -> dict:
     }
 
 
+def _answer_mistral(question: str, context: str, chunks: List[dict]) -> dict:
+    """Call Mistral Small via mistralai SDK v2 (free tier available)."""
+    try:
+        from mistralai import Mistral
+    except ImportError:
+        raise ImportError("Run: pip install mistralai")
+
+    if not settings.mistral_api_key:
+        raise EnvironmentError(
+            "MISTRAL_API_KEY is not set in .env. "
+            "Get a free key at https://console.mistral.ai"
+        )
+
+    client = Mistral(api_key=settings.mistral_api_key)
+
+    response = client.chat.complete(
+        model="mistral-small-latest",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+        ]
+    )
+
+    answer_text = response.choices[0].message.content
+    logger.info("Answer generated | provider=mistral | chars=%d", len(answer_text))
+
+    return {
+        "answer": answer_text,
+        "sources": [
+            {"source": c.get("source"), "score": c.get("score", 0)}
+            for c in chunks
+        ]
+    }
+
+
+def _answer_openai(question: str, context: str, chunks: List[dict]) -> dict:
+    """Call GPT-4o-mini via OpenAI SDK (requires paid credits)."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise ImportError("Run: pip install openai")
+
+    if not settings.openai_api_key:
+        raise EnvironmentError("OPENAI_API_KEY is not set in .env")
+
+    client = OpenAI(api_key=settings.openai_api_key)
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+        ]
+    )
+
+    answer_text = resp.choices[0].message.content
+    logger.info("Answer generated | provider=openai | chars=%d", len(answer_text))
+
+    return {
+        "answer": answer_text,
+        "sources": [
+            {"source": c.get("source"), "score": c.get("score", 0)}
+            for c in chunks
+        ]
+    }
+
+
 def _answer_anthropic(question: str, context: str, chunks: List[dict]) -> dict:
-    """Call Claude via the Anthropic SDK (requires paid credits)."""
+    """Call Claude Sonnet via Anthropic SDK (requires paid credits)."""
     try:
         import anthropic
     except ImportError:
-        raise ImportError("Run: python3 -m pip install anthropic")
+        raise ImportError("Run: pip install anthropic")
 
     if not settings.anthropic_api_key:
         raise EnvironmentError(
@@ -132,72 +199,6 @@ def _answer_anthropic(question: str, context: str, chunks: List[dict]) -> dict:
 
     answer_text = message.content[0].text
     logger.info("Answer generated | provider=anthropic | chars=%d", len(answer_text))
-
-    return {
-        "answer": answer_text,
-        "sources": [
-            {"source": c.get("source"), "score": c.get("score", 0)}
-            for c in chunks
-        ]
-    }
-
-
-def _answer_openai(question: str, context: str, chunks: List[dict]) -> dict:
-    """Call GPT via the OpenAI SDK (requires paid credits)."""
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise ImportError("Run: python3 -m pip install openai")
-
-    if not settings.openai_api_key:
-        raise EnvironmentError("OPENAI_API_KEY is not set in .env")
-
-    client = OpenAI(api_key=settings.openai_api_key)
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
-        ]
-    )
-    answer_text = resp.choices[0].message.content
-    logger.info("Answer generated | provider=openai | chars=%d", len(answer_text))
-
-    return {
-        "answer": answer_text,
-        "sources": [
-            {"source": c.get("source"), "score": c.get("score", 0)}
-            for c in chunks
-        ]
-    }
-
-
-def _answer_mistralai(question: str, context: str, chunks: List[dict]) -> dict:
-    """Call Mistral via the Mistral AI API."""
-    try:
-        from mistralai.client import MistralClient
-        from mistralai.models.chat_completion import ChatMessage
-    except ImportError:
-        raise ImportError("Run: python3 -m pip install mistralai")
-
-    if not settings.mistral_api_key:
-        raise EnvironmentError("MISTRAL_API_KEY is not set in .env")
-
-    client = MistralClient(api_key=settings.mistral_api_key)
-
-    resp = client.chat(
-        model="mistral-small",
-        messages=[
-            ChatMessage(role="system", content=SYSTEM_PROMPT),
-            ChatMessage(
-                role="user",
-                content=f"Context:\n{context}\n\nQuestion: {question}"
-            )
-        ]
-    )
-
-    answer_text = resp.choices[0].message.content
-    logger.info("Answer generated | provider=mistral | chars=%d", len(answer_text))
 
     return {
         "answer": answer_text,
